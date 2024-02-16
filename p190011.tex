@@ -42,6 +42,7 @@
 \maketitle
 \thispagestyle{empty}
 
+\setcounter{page}{0}
 \vspace*{20pt plus 1fil}
 \parindent=1zw
 \noindent
@@ -51,7 +52,6 @@
 
 \pagenumbering{roman} % I, II, III, IV 
 \tableofcontents
-\setcounter{page}{1}
 
 \listoffigures
 %\listoftables
@@ -107,15 +107,17 @@ Riffusionの特徴として, メルスペクトログラムを生成する際に
 また, 横方向1[px]は10[ms]に対しての短時間フーリエ変換の結果を表すため, 今回用いる画像は5.12[s]の音源情報を表すことになる.
 
 \begin{figure}[htbp]
-  \centering
-  \includegraphics[width=0.4\linewidth]{energy_guitar.jpg}
-  \caption{要修正}
-  \label{melsp}
+  \begin{center}
+    \includegraphics[width=0.8\linewidth]{energy_guitar.jpg}
+      \caption{シード値42, テキスト``energy guitar''の入力でRiffusionにより生成されたメルスペクトログラム}
+    \label{melsp}
+  \end{center}
 \end{figure}
 
 そして, メルスペクトログラムに対して逆短時間フーリエ変換を施すことによって波形データが得られ, 
 人が音源を聞くことができるようになる.
 
+\newpage
 \section{Riffusionの課題}
 Riffusionを用いて, ユーザーのイメージする音楽を生成するためには, 
 \begin{enumerate}
@@ -153,17 +155,17 @@ Riffusionが他の音楽生成AIと異なる大きな特徴は, 楽曲の生成�
 ユーザーの要求を満足しているかを判定できる可能性は十分にあると考えた.
 また, 判定機構には人間の感性を模倣するためにニューラルネットワーク(NN)を用いる.
 
+\newpage
 \section{システム概要}
 図\ref{system}に本研究で開発した提案するシステムの概要を示す.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.4\linewidth]{energy_guitar.jpg}
-  \caption{要修正}
+  \includegraphics[width=\linewidth]{sys.png}
+  \caption{提案システムの概要}
   \label{system}
 \end{figure}
 
-\newpage
 システムの動作, すなわちシステムとユーザーの一連の対話は以下の手順になる.
 \begin{enumerate}
   \item ユーザーがUIにテキストデータを入力する.\label{s1}
@@ -284,8 +286,8 @@ Joyful activation, Tension, Sadnessとなっている.
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.4\linewidth]{energy_guitar.jpg}
-  \caption{要修正}
+  \includegraphics[width=0.8\linewidth]{graph.png}
+  \caption{300エポック学習した際の学習用データと検証用データの損失関数の推移}
   \label{result}
 \end{figure}
 
@@ -337,8 +339,8 @@ trainにおける最良値は293エポック目で, RMSE=0.0449, Degree=2.5727, 
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=0.4\linewidth]{energy_guitar.jpg}
-  \caption{要修正}
+  \includegraphics[width=0.9\linewidth]{UI.png}
+  \caption{本実験に用いたUI画面}
   \label{UI1}
 \end{figure}
 
@@ -501,7 +503,256 @@ trainにおける最良値は293エポック目で, RMSE=0.0449, Degree=2.5727, 
 \section*{印象判定用NNソースコード}
 \addcontentsline{toc}{section}{\numberline{}印象判定用NNソースコード}
 \begin{lstlisting}[caption=印象判定用NN{,} DenseNetに関するソースコード, label=source]
+  import torch
+  import torch.nn as nn
+  import torch.optim as optim
   
+  import pytorch_lightning as pl
+  from torchmetrics.regression import R2Score
+  import numpy as np
+  
+  
+  class Degree(nn.Module):#θと内積です
+      def __init__(self): # パラメータの設定など初期化処理を行う
+          super(Degree, self).__init__()
+  
+      def forward(self, outputs, targets): # モデルの出力と正解データ
+          loss = torch.mean(torch.rad2deg(torch.acos(torch.sum(outputs*targets, dim=-1, keepdim=True))))
+          return loss
+  
+  class RMSELoss(nn.Module):
+      def __init__(self): # パラメータの設定など初期化処理を行う
+          super(RMSELoss, self).__init__()
+  
+      def forward(self, outputs, targets): # モデルの出力と正解データ
+          loss = torch.mean(torch.norm(outputs - targets, dim=-1))
+          return loss
+  
+  class Vectolize(nn.Module):
+      def __init__(self):
+          super(Vectolize, self).__init__()
+  
+      def forward(self, in_channels):
+          in_channels = torch.abs(in_channels)
+          unit_vector = in_channels / torch.norm(in_channels, dim=-1, keepdim=True)
+          return unit_vector
+  
+  
+  class bn_relu_conv2d(nn.Module):
+      def __init__(self, in_channels, out_channels, kernel_size, stride,padding=1):
+          super(bn_relu_conv2d, self).__init__()
+          self.bn = nn.BatchNorm2d(in_channels)
+          self.relu = nn.ReLU(inplace=True)
+          self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
+          self.drop = nn.Dropout(0.2)
+  
+      def forward(self, x):
+          out = self.bn(x)
+          out = self.relu(out)
+          out = self.conv(out)
+          out = self.drop(out)
+          return out
+  
+  class bn_relu_conv1d(nn.Module):
+      def __init__(self, in_channels, out_channels, kernel_size, stride,padding=1):
+          super(bn_relu_conv1d, self).__init__()
+          self.bn = nn.BatchNorm1d(in_channels)
+          self.relu = nn.ReLU(inplace=True)
+          self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
+          self.drop = nn.Dropout(0.2)
+  
+      def forward(self, x):
+          out = self.bn(x)
+          out = self.relu(out)
+          out = self.conv(out)
+          out = self.drop(out)
+          return out
+  
+  class dense_layer(nn.Module):
+      def __init__(self, in_channels, growth_rate):
+          super(dense_layer, self).__init__()
+  
+          self.conv1 = bn_relu_conv2d(in_channels, out_channels=growth_rate*4, kernel_size=1, stride=1, padding=0)
+          self.conv2 = bn_relu_conv2d(growth_rate*4, out_channels=growth_rate, kernel_size=3, stride=1)
+  
+      def forward(self, x):
+          out = self.conv1(x)
+          out = self.conv2(out)
+          return out
+  
+  class dense_block(nn.Module):
+      """dense block"""
+      def __init__(self, in_channels, num_layers, growth_rate):
+          super(dense_block, self).__init__()
+  
+          dense_layers = []
+          for i in range(num_layers):
+              dense_layers += [dense_layer(in_channels=int(in_channels + i*growth_rate), growth_rate=growth_rate)]
+          self.dense_layers = nn.Sequential(*dense_layers)
+  
+      def forward(self, x):
+          for layer in self.dense_layers:
+              out = layer(x)
+              x = torch.cat([x, out], 1)
+          return x
+  
+  class transition_layer(nn.Module):
+      def __init__(self, in_channels, out_channels):
+          super(transition_layer, self).__init__()
+          self.conv = bn_relu_conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=1,padding=0)
+          self.pool = nn.AvgPool2d(kernel_size=2, stride=2)
+  
+      def forward(self, x):
+          out = self.conv(x)
+          out = self.pool(out)
+          return out
+  
+  class dense_net(nn.Module):
+      """dense block"""
+      def __init__(self, num_layers, growth_rate, num_classes=1000):
+          super(dense_net, self).__init__()
+  
+          in_channels=  2 * growth_rate
+          self.first_layer = nn.Sequential(
+              *[bn_relu_conv2d(in_channels=1, out_channels=in_channels, kernel_size=9, stride=2, padding=4),
+              nn.MaxPool2d(kernel_size=3, stride=2, padding=1)]
+          )
+          layer_dense = []
+          for i in range(len(num_layers)):
+              layer_dense += [dense_block(in_channels=in_channels, num_layers=num_layers[i], growth_rate=growth_rate)]
+  
+              in_channels += growth_rate * num_layers[i]
+              if i != (len(num_layers)-1):
+                  layer_dense += [transition_layer(in_channels=in_channels, out_channels=in_channels//2)]
+                  in_channels = in_channels//2
+  
+          layer_dense += [nn.AdaptiveAvgPool2d((1,1))]
+  
+          self.layer_dense = nn.Sequential(*layer_dense)
+          self.fully_connection = nn.Linear(in_channels, num_classes)
+          self.classifier = Vectolize()
+  
+      def forward(self, x):
+          out = self.first_layer(x)
+          out = self.layer_dense(out)
+          out = out.view(out.shape[0], -1)
+          out = self.fully_connection(out)
+          out = self.classifier(out)
+          return out
+  
+  class DenseTrainer(pl.LightningModule):
+      def __init__(self):
+          super().__init__()
+          self.model = dense_net(num_layers=[6,12,48,32,32], growth_rate=12, num_classes=9) if model is None else model
+  
+          self.training_step_outputs = []   # save outputs in each batch to compute metric overall epoch
+          self.val_step_outputs = []        # save outputs in each batch to compute metric overall epoch
+      def forward(self, x):
+          out = self.model(x)
+          return out
+  
+      def training_step(self, batch, batch_idx):
+          x, y = batch
+          x, y = x.to("cuda"), y.to("cuda")
+          y_hat = self.forward(x)#hatは予測値
+          loss = RMSELoss()(y_hat, y)
+          ret = {'loss': loss, 'y_hat':y_hat, 'y':y, 'tr_batch_loss': loss.item()*x.size(0)}
+          self.training_step_outputs.append(ret)
+          return ret
+  
+      def validation_step(self, batch, batch_idx):
+          x, y = batch
+          x, y = x.to("cuda"), y.to("cuda")
+          y_hat = self.forward(x)
+          loss = RMSELoss()(y_hat, y)
+          ret = {'y_hat':y_hat, 'y':y, 'val_batch_loss': loss.item()*x.size(0)}
+          self.val_step_outputs.append(ret)
+          return ret
+  
+      def on_train_epoch_end(self):
+          y_hat = torch.cat([val['y_hat'] for val in self.training_step_outputs], dim=0)
+          y = torch.cat([val['y'] for val in self.training_step_outputs], dim=0)
+          epoch_loss = sum([val['tr_batch_loss'] for val in self.training_step_outputs])/y_hat.size(0)
+          r2 = R2Score(num_outputs=9, multioutput='raw_values').to("cuda")(y_hat, y).mean()
+          mse = Degree()(y_hat, y)
+          self.log('train_loss', epoch_loss, prog_bar=True, on_epoch=True)
+          self.log('train_r2', r2, prog_bar=True, on_epoch=True)
+  
+          print('train Loss: {:.4f} train R2: {:.4f} train degree {:.4f}\n'.format(epoch_loss,r2, mse))
+  
+          self.training_step_outputs.clear()
+          
+  
+      def on_validation_epoch_end(self):
+          y_hat = torch.cat([val['y_hat'] for val in self.val_step_outputs], dim=0)
+          y = torch.cat([val['y'] for val in self.val_step_outputs], dim=0)
+          epoch_loss = sum([val['val_batch_loss'] for val in self.val_step_outputs])/y_hat.size(0)
+          print(y_hat[0])
+          print(y[0])
+          r2 = R2Score(num_outputs=9, multioutput='raw_values').to("cuda")(y_hat, y).mean()
+          mse = Degree()(y_hat, y)
+          self.log('val_loss', epoch_loss, prog_bar=True, on_epoch=True)
+          self.log('val_r2', r2, prog_bar=True, on_epoch=True)
+  
+          print(f'---------- Current Epoch {self.current_epoch+1} ----------')
+          print('valid Loss: {:.4f} valid R2: {:.4f} valid degree: {:.4f}'.format(epoch_loss,r2, mse))
+          print()
+          self.val_step_outputs.clear()
+          
+  
+  
+      def configure_optimizers(self):
+          optimizer = optim.SGD(self.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
+          scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 225], gamma=0.1)
+          return {'optimizer': optimizer, 'lr_scheduler': scheduler}
+  
+  
+  
+  class TransferTrainer(pl.LightningModule):
+      def __init__(self, model):
+          super().__init__()
+          self.model = model
+          self.model.train()
+          for param in self.model.parameters():
+              param.requires_grad = False
+          
+          self.model.fully_connection = nn.Linear(744, 9)
+  
+          self.training_step_outputs = []   # save outputs in each batch to compute metric overall epoch
+  
+      def forward(self, x):
+          out = self.model(x)
+          return out
+  
+      def training_step(self, batch, batch_idx):
+          x, y = batch
+          x, y = x.to("cuda"), y.to("cuda")
+          y_hat = self.forward(x)#hatは予測値
+          loss = RMSELoss()(y_hat, y)
+          ret = {'loss': loss, 'y_hat':y_hat, 'y':y, 'tr_batch_loss': loss.item()*x.size(0)}
+          self.training_step_outputs.append(ret)
+          return ret
+  
+  
+      def on_train_epoch_end(self):
+          y_hat = torch.cat([val['y_hat'] for val in self.training_step_outputs], dim=0)
+          y = torch.cat([val['y'] for val in self.training_step_outputs], dim=0)
+          epoch_loss = sum([val['tr_batch_loss'] for val in self.training_step_outputs])/y_hat.size(0)
+          r2 = R2Score(num_outputs=9, multioutput='raw_values').to("cuda")(y_hat, y).mean()
+          mse = Degree()(y_hat, y)
+          self.log('train_loss', epoch_loss, prog_bar=True, on_epoch=True)
+          self.log('train_r2', r2, prog_bar=True, on_epoch=True)
+  
+          print('train Loss: {:.4f} train R2: {:.4f} train MLSE: {:.4f}\n'.format(epoch_loss,r2, mse))
+  
+          self.training_step_outputs.clear()
+  
+  
+  
+      def configure_optimizers(self):
+          optimizer = optim.SGD(self.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
+          scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[20, 30], gamma=0.1)
+          return {'optimizer': optimizer, 'lr_scheduler': scheduler}
 \end{lstlisting}
 \newpage
 \addcontentsline{toc}{chapter}{\numberline{}参考文献}
